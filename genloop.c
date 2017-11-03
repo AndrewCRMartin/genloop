@@ -3,11 +3,11 @@
    Program:    genloop
    File:       genloop.c
    
-   Version:    V1.2
-   Date:       19.11.93
+   Version:    V2.3
+   Date:       25.10.94
    Function:   Build loop backbones from phi/psi/omega data
    
-   Copyright:  (c) SciTech Software 1993
+   Copyright:  (c) SciTech Software 1993-4
    Author:     Dr. Andrew C. R. Martin
    Address:    SciTech Software
                23, Stag Leys,
@@ -28,8 +28,8 @@
    else breaks this code, I don't want to be blamed for code that does not
    work! The code may not be sold commercially without prior permission 
    from the author, although it may be given away free with commercial 
-   products, providing it is made clear that this program is free and that 
-   the source code is provided with the program.
+   products, providing it is made clear that this program is free and 
+   that the source code is provided with the program.
 
    Special Provisions
    ==================
@@ -53,14 +53,65 @@
    19.11.93 A modified version of OML's AbM searchdb now exists which will
    generate the omega angles.
 
+   07.06.94 A slight re-write to use output files from Martin's neural
+   networks.
+
 **************************************************************************
 
    Usage:
    ======
-   genloop [-c] [-o] [-s] <hitfile> <torfile> <outfile>
+   genloop [-c] [-o] [-s] [-n] <hitfile> <torfile> <outfile>
    -c causes only C-alpha coordinates to be written
    -o causes no omega angles to be used; all 180.0
    -s causes small format output
+   -n use neural network data
+
+   Input format is:
+
+   nres nentries            (Free format integers)
+
+   title line
+---------------------------------------------------------
+   X    phi      psi      omega
+   X    phi      psi      omega
+   X    phi      psi      omega
+   ...
+
+   title line
+---------------------------------------------------------
+   X    phi      psi      omega
+   X    phi      psi      omega
+   X    phi      psi      omega
+   ...
+
+   Rigid columns are required: (3X,A1,4X,3(F8,1X))
+
+
+
+
+The HITS FILE is simply a set of title lines which are copied
+into the output file.
+
+
+EXAMPLE TORSIONS FILE
+=====================
+     5    2   (Loop Length and number of entries)
+
+Residue    PHI      PSI     OMEGA
+----------------------------------
+   R        -     127.593  180.000
+   A     -82.379  146.780  178.243
+   S     -65.588  -17.103  182.203
+   E    -160.615 -164.887  179.372
+   N     -97.135     -        -
+
+Residue    PHI      PSI     OMEGA
+----------------------------------
+   R        -     138.362  177.265
+   A    -122.742  108.730  182.157
+   S     -49.318   -3.193  180.275
+   Q    -142.030  152.142  179.286
+   S     -51.111     -        -
 
 **************************************************************************
 
@@ -74,12 +125,17 @@
    V1.0  09.11.93 Original
    V1.1  10.11.93 Added omega handling and -o and -s options
    V1.2  19.11.93 Now creates the correct sequence in PDB style output
+   V2.0  07.06.94 Rewritten to use Martin's network output files
+   V2.1  10.06.94 Bug fix in fixed omegas (=180.0)
+   V2.2  28.07.94 Bug fix in call to GetTorsions()
+   V2.3  25.10.94 Another Bug fix in call to GetTorsions()
 
 *************************************************************************/
 /* Includes
 */
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <math.h>
 
 #include "bioplib/MathType.h"
@@ -103,11 +159,6 @@
 /************************************************************************/
 /* Macros
 */
-#ifdef DEBUG
-#define D(BUG) printf(BUG);
-#else
-#define D(BUG)
-#endif
 
 /************************************************************************/
 /* Type definitions
@@ -136,9 +187,10 @@ FILE *gHitfp = NULL,
 int main(int argc, char **argv);
 BOOL ProcessCmdLine(int argc, char **argv, BOOL *calphas, char *hitfile,
                     char *torfile, char *outfile, BOOL *DoOmega,
-                    BOOL *SmallOut);
+                    BOOL *SmallOut, BOOL *DoNNFile);
 BOOL OpenFiles(char *hitfile, char *torfile, char *outfile);
-void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut);
+void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut, 
+                  BOOL DoNNFile);
 int GetTorsions(FILE *fp, int nres, REAL *phi, REAL *psi, BOOL DoOmega,
                 REAL *omega);
 ENTRY *BuildFragment(int ntor, REAL *phi, REAL *psi, REAL *omega);
@@ -155,6 +207,7 @@ char *GetSequence(char *buffer);
 
    08.11.93 Original   By: ACRM
    10.11.93 Modified to support omega angle
+   07.06.94 Modified to support neural nets files
 */
 int main(int argc, char **argv)
 {
@@ -163,44 +216,51 @@ int main(int argc, char **argv)
         outfile[160];
    BOOL calphas  = FALSE,
         DoOmega  = TRUE,
-        SmallOut = FALSE;
+        SmallOut = FALSE,
+        DoNNFile = FALSE;
 
    if(ProcessCmdLine(argc, argv, &calphas, hitfile, torfile, outfile, 
-                     &DoOmega, &SmallOut))
+                     &DoOmega, &SmallOut, &DoNNFile))
    {
       /* Open the files                                                 */
       if(OpenFiles(hitfile, torfile, outfile))
       {
-         DoProcessing(calphas, DoOmega, SmallOut);
+         DoProcessing(calphas, DoOmega, SmallOut, DoNNFile);
       }
    }
    else
    {
-      printf("Usage: genloop [-c] [-o] [-s] <hitfile> <torfile> <outfile>\n");
+      printf("Usage: genloop [-c] [-o] [-s] [-n] <hitfile> <torfile> \
+<outfile>\n");
       printf("       -c causes only C-alpha coordinates to be written\n");
       printf("       -o causes no omega angles to be used; all 180.0\n");
       printf("       -s causes a small format output to be created\n");
-      printf("Genloop V1.2 (c) Andrew C.R. Martin 19.11.93\n");
-      printf("This program is freely distributable providing no profit is \
-made in so doing.\n");
-      printf("Builds a file containing coordinates from the hit file and\n");
-      printf("torsion file created by the AbM searchdb program\n");
+      printf("       -n read Martin Reczko's neural net output\n");
+      
+      printf("Genloop V2.3 (c) Andrew C.R. Martin 25.10.94\n");
+      printf("This program is freely distributable providing no profit \
+is made in so doing.\n");
+      printf("Builds a file containing coordinates from the hit \
+file and\n");
+      printf("torsion file created by AbM or Martin Reczko's neural \
+nets\n");
    }
 }
 
 /************************************************************************/
 /*>BOOL ProcessCmdLine(int argc, char **argv, BOOL *calphas, 
                        char *hitfile, char *torfile, char *outfile, 
-                       BOOL *DoOmega, BOOL *SmallOut)
-   ----------------------------------------------------------------
+                       BOOL *DoOmega, BOOL *SmallOut, BOOL *DoNNFile)
+   ------------------------------------------------------------------
    Process the command line
 
    08.11.93 Original   By: ACRM
    10.11.93 Added -o and -s flags
+   07.06.94 Added -n flag
 */
 BOOL ProcessCmdLine(int argc, char **argv, BOOL *calphas, char *hitfile,
                     char *torfile, char *outfile, BOOL *DoOmega,
-                    BOOL *SmallOut)
+                    BOOL *SmallOut, BOOL *DoNNFile)
 {
    argc--; argv++;
 
@@ -218,6 +278,9 @@ BOOL ProcessCmdLine(int argc, char **argv, BOOL *calphas, char *hitfile,
             break;
 	 case 's': case 'S':
             *SmallOut = TRUE;
+            break;
+         case 'n': case 'N':
+            *DoNNFile = TRUE;
             break;
 	 default:
             fprintf(stderr,"Unknown switch %s, ignored\n",argv[0]);
@@ -272,7 +335,8 @@ BOOL OpenFiles(char *hitfile, char *torfile, char *outfile)
 }
 
 /************************************************************************/
-/*>void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut)
+/*>void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut, 
+                     BOOL DoNNFile)
    ------------------------------------------------------------
    Read headers then read info line from hits file and torsion data
    from torsion file then call routine to build conformation.
@@ -281,8 +345,15 @@ BOOL OpenFiles(char *hitfile, char *torfile, char *outfile)
    10.11.93 Added omega processing and small output flag
    19.11.93 Modified to create correct sequence in output PDB type
             listings
+   07.06.94 Added DoNNFile parameter handling
+   08.06.94 Added reading of loop length from torsion file
+   28.07.94 Fixed bug in call to GetTorsions() By: MR
+   25.10.94 The change to ntor rather than nres meant that it only
+            worked for Neural net files as the fix was in the wrong
+            place. Now done correctly. 
 */
-void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut)
+void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut, 
+                  BOOL DoNNFile)
 {
    REAL  phi[MAXTOR],
          psi[MAXTOR],
@@ -292,6 +363,7 @@ void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut)
          nres,
          nentries;
    char  HitBuffer[160],
+         buffer[160],
          *seq;
 
    /* Read header from torsions file                                    */
@@ -300,13 +372,54 @@ void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut)
 
    while(fgets(HitBuffer,160,gHitfp))
    {
-      fputs(HitBuffer,gOutfp);
+      fprintf(gOutfp,"REMARK %s",HitBuffer);
       seq = GetSequence(HitBuffer);
+
+      /* If it's a neural net file, we get the number of residues next  */
+      if(DoNNFile)
+      {
+         fgets(buffer,160,gTorfp);
+         TERMINATE(buffer);
+         sscanf(buffer,"%d",&nres);   /* ACRM: nres not ntor            */
+      }
+
+      /* Get the torsion data (if a neural net file, this is the 
+         target data)
+         MR: ntor not nres in paramters
+         25.10.94 ACRM: nres again, fix should have been in the sscanf() 
+                        above
+      */
       if((ntor = GetTorsions(gTorfp,nres,phi,psi,DoOmega,omega)) != 0)
       {
          entry = BuildFragment(ntor,phi,psi,omega);
          WriteFragment(gOutfp,entry,calphas,SmallOut,seq);
          FREELIST(entry,ENTRY);
+      }
+
+      /* If it's a neural net file we now get the predicted data        */
+      if(DoNNFile)
+      {
+         /* MR: ntor not nres in paramters 
+            25.10.94 ACRM: fixed back to nres
+         */
+         if((ntor = GetTorsions(gTorfp,nres,phi,psi,DoOmega,omega)) != 0)
+         {
+            entry = BuildFragment(ntor,phi,psi,omega);
+            fprintf(gOutfp,"TER\n");
+            
+            WriteFragment(gOutfp,entry,calphas,SmallOut,seq);
+            fprintf(gOutfp,"TER\n");
+            FREELIST(entry,ENTRY);
+         }
+      }
+
+      /* If it's a neural net file, skip along until we read a > sign   */
+      if(DoNNFile)
+      {
+         while(fgets(buffer,160,gTorfp))
+         {
+            if(buffer[0] == '>') break;
+         }
       }
    }
 }
@@ -319,6 +432,8 @@ void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut)
 
    09.11.93 Original   By: ACRM
    10.11.93 Added omega input
+   07.06.94 Modified to skip all lines until the line of ----s
+   10.06.94 Corrected fixed omegas to PI not 180.0
 */
 int GetTorsions(FILE *fp, int nres, REAL *phi, REAL *psi, BOOL DoOmega,
                 REAL *omega)
@@ -329,10 +444,12 @@ int GetTorsions(FILE *fp, int nres, REAL *phi, REAL *psi, BOOL DoOmega,
         *pomega = TorBuffer+26;
    int  i;
 
-   /* Read the blank line, title line and underline                     */
-   if(!fgets(TorBuffer,160,fp)) return(0);
-   if(!fgets(TorBuffer,160,fp)) return(0);
-   if(!fgets(TorBuffer,160,fp)) return(0);
+   /* Skip any lines up to and including the line of ------s
+      This includes a blank line and the title line; also a line starting
+      with > to separate pairs
+    */
+   for(TorBuffer[0] = '\0'; TorBuffer[0] != '-';)
+      if(!fgets(TorBuffer,160,fp)) return(0);
 
    for(i=0; i<nres; i++)
    {
@@ -344,8 +461,8 @@ int GetTorsions(FILE *fp, int nres, REAL *phi, REAL *psi, BOOL DoOmega,
       TorBuffer[16] = '\0';
       TorBuffer[25] = '\0';
 
-      /* Read the phi, psi & omega values treating the first and last cases
-         specially as only some torsions will be defined.
+      /* Read the phi, psi & omega values treating the first and last 
+         cases specially as only some torsions will be defined.
       */
       if(i==0)
       {
@@ -355,7 +472,7 @@ int GetTorsions(FILE *fp, int nres, REAL *phi, REAL *psi, BOOL DoOmega,
          if(DoOmega)
             omega[i] = (REAL)(PI*atof(pomega)/180.0);
          else
-            omega[i] = (REAL)180.0;
+            omega[i] = (REAL)PI;
       }
       else if(i==(nres-1))
       {
@@ -371,7 +488,7 @@ int GetTorsions(FILE *fp, int nres, REAL *phi, REAL *psi, BOOL DoOmega,
          if(DoOmega)
             omega[i] = (REAL)(PI*atof(pomega)/180.0);
          else
-            omega[i] = (REAL)180.0;
+            omega[i] = (REAL)PI;
       }
    }
 
@@ -401,7 +518,7 @@ ENTRY *BuildFragment(int ntor, REAL *phi, REAL *psi, REAL *omega)
    /* Check input                                                       */
    if(ntor == 0) return(NULL);
 
-   /* Initialise a ENTRY structure for the start N                        */
+   /* Initialise an ENTRY structure for the start N                     */
    INITPREV(entry,ENTRY);
    if(entry == NULL) return(NULL);
 
@@ -618,8 +735,8 @@ BOOL BuildAtom(ENTRY *p, ENTRY *q, ENTRY *r, REAL theta, REAL bond,
 /*>void WriteFragment(FILE *gOutfp, ENTRY *entry, BOOL calphas, 
                       BOOL SmallOut, char *seq)
    ------------------------------------------------------------
-   Writes the atom names and coordinates from the ENTRY linked list to the 
-   output file. If the calphas flag is set, only CA's will be written.
+   Writes the atom names and coordinates from the ENTRY linked list to 
+   the output file. If the calphas flag is set, only CA's will be written.
    
    09.11.93 Original   By: ACRM
    10.11.93 Added SmallOut option
