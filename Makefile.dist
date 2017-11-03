@@ -1,0 +1,13 @@
+CC      = cc 
+COPY    = -O2
+OFILES1 = genloop.o bioplib/throne.o
+LIBS    = -lm -lxml2
+
+genloop : $(OFILES1)
+	$(CC) -o $@ $(OFILES1) $(LIBS)
+
+.c.o :
+	$(CC) -c -o $@ $<
+
+clean :
+	\rm -f $(OFILES)

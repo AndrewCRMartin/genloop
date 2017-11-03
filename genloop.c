@@ -3,21 +3,14 @@
    Program:    genloop
    File:       genloop.c
    
-   Version:    V2.3
-   Date:       25.10.94
+   Version:    V2.4
+   Date:       03.11.17
    Function:   Build loop backbones from phi/psi/omega data
    
-   Copyright:  (c) SciTech Software 1993-4
+   Copyright:  (c) SciTech Software 1993-2017
    Author:     Dr. Andrew C. R. Martin
    Address:    SciTech Software
-               23, Stag Leys,
-               Ashtead,
-               Surrey,
-               KT21 2TD.
-   Phone:      +44 (0372) 275775
-   EMail:      UUCP:  cbmehq!cbmuk!scitec!amartin
-                      amartin@scitec.adsp.sub.org
-               JANET: andrew@uk.ac.ox.biop
+   EMail:      andrew@bioinf.org.uk
                
 **************************************************************************
 
@@ -66,27 +59,30 @@
    -s causes small format output
    -n use neural network data
 
-   Input format is:
+Normal input format is:
 
-   nres nentries            (Free format integers)
+nres nentries            (Free format integers)
 
-   title line
+title line
 ---------------------------------------------------------
    X    phi      psi      omega
    X    phi      psi      omega
    X    phi      psi      omega
    ...
 
-   title line
+title line
 ---------------------------------------------------------
    X    phi      psi      omega
    X    phi      psi      omega
    X    phi      psi      omega
    ...
 
-   Rigid columns are required: (3X,A1,4X,3(F8,1X))
+Rigid columns are required: (3X,A1,4X,3(F8,1X))
 
 
+The neural network file format is the same but has pairs of
+actual and predicted loop conformations. Each pair is separated 
+by a > sign
 
 
 The HITS FILE is simply a set of title lines which are copied
@@ -129,6 +125,8 @@ Residue    PHI      PSI     OMEGA
    V2.1  10.06.94 Bug fix in fixed omegas (=180.0)
    V2.2  28.07.94 Bug fix in call to GetTorsions()
    V2.3  25.10.94 Another Bug fix in call to GetTorsions()
+   V2.4  03.11.17 Updated for new Bioplib and various tidying for clean
+                  compile for ISO C90
 
 *************************************************************************/
 /* Includes
@@ -230,21 +228,81 @@ int main(int argc, char **argv)
    }
    else
    {
-      printf("Usage: genloop [-c] [-o] [-s] [-n] <hitfile> <torfile> \
+      printf("\ngenloop V2.4 (c) 1993-2017, Dr. Andrew C.R. Martin\n");
+      printf("\nUsage: genloop [-c] [-o] [-s] [-n] <hitfile> <torfile> \
 <outfile>\n");
       printf("       -c causes only C-alpha coordinates to be written\n");
       printf("       -o causes no omega angles to be used; all 180.0\n");
       printf("       -s causes a small format output to be created\n");
       printf("       -n read Martin Reczko's neural net output\n");
       
-      printf("Genloop V2.3 (c) Andrew C.R. Martin 25.10.94\n");
-      printf("This program is freely distributable providing no profit \
-is made in so doing.\n");
-      printf("Builds a file containing coordinates from the hit \
+      printf("\nBuilds a file containing coordinates from the hit \
 file and\n");
       printf("torsion file created by AbM or Martin Reczko's neural \
 nets\n");
+
+      printf("\n\n<hitfile> is simply a set of title lines which are \
+copied\n");
+      printf("into the output file.\n");
+
+      printf("\n<torfile> format is:\n");
+
+      printf("\nnres nentries            (Free format integers)\n");
+
+      printf("\n   title line\n");
+      printf("-----------------------------------------------------\
+----\n");
+      printf("   X    phi      psi      omega\n");
+      printf("   X    phi      psi      omega\n");
+      printf("   X    phi      psi      omega\n");
+      printf("   ...\n");
+
+      printf("\n   title line\n");
+      printf("-----------------------------------------------------\
+----\n");
+      printf("   X    phi      psi      omega\n");
+      printf("   X    phi      psi      omega\n");
+      printf("   X    phi      psi      omega\n");
+      printf("   ...\n");
+      printf("\n");
+      printf("Rigid columns are required: (3X,A1,4X,3(F8,1X))\n");
+
+      printf("\nThe neural network file format is the same but has \
+pairs of\n");
+      printf("actual and predicted loop conformations. Each pair is \
+separated \n");
+      printf("by a > sign\n");
+
+      printf("\n\nEXAMPLE TORSIONS FILE\n");
+      printf("=====================\n");
+      printf("     5    2\n");
+
+      printf("\nResidue    PHI      PSI     OMEGA\n");
+      printf("----------------------------------\n");
+      printf("   R        -     127.593  180.000\n");
+      printf("   A     -82.379  146.780  178.243\n");
+      printf("   S     -65.588  -17.103  182.203\n");
+      printf("   E    -160.615 -164.887  179.372\n");
+      printf("   N     -97.135     -        -\n");
+
+      printf("\nResidue    PHI      PSI     OMEGA\n");
+      printf("----------------------------------\n");
+      printf("   R        -     138.362  177.265\n");
+      printf("   A    -122.742  108.730  182.157\n");
+      printf("   S     -49.318   -3.193  180.275\n");
+      printf("   Q    -142.030  152.142  179.286\n");
+      printf("   S     -51.111     -        -\n");
+      printf("\n");
+
+      printf("NOTE: The OMEGA angle is placed with the amino acid \
+BEFORE the peptide\n");
+      printf("      bond instead of the one after as is more normal\n");
+
+      printf("\nThis program is freely distributable providing no \
+profit is made in so doing.\n\n");
    }
+
+   return(0);
 }
 
 /************************************************************************/
@@ -742,13 +800,15 @@ BOOL BuildAtom(ENTRY *p, ENTRY *q, ENTRY *r, REAL theta, REAL bond,
    10.11.93 Added SmallOut option
    19.11.93 Added seq parameter; now write correct sequence in PDB type
             output.
+   03.11.17 Initialize resnam and change %lf to %f
 */
 void WriteFragment(FILE *gOutfp, ENTRY *entry, BOOL calphas, 
                    BOOL SmallOut, char *seq)
 {
    ENTRY *p;
-   int atnum=1, resnum=0;
-   char *resnam;
+   int    atnum  = 1,
+          resnum = 0;
+   char  *resnam = NULL;
 
    for(p=entry; p!=NULL; NEXT(p))
    {
@@ -757,18 +817,18 @@ void WriteFragment(FILE *gOutfp, ENTRY *entry, BOOL calphas,
          if(!calphas)
          {
             if(!strcmp(p->atnam,"N   "))
-               fprintf(gOutfp,"N    %8.3lf%8.3lf%8.3lf\n",p->x,p->y,p->z);
+               fprintf(gOutfp,"N    %8.3f%8.3f%8.3f\n",p->x,p->y,p->z);
             if(!strcmp(p->atnam,"C   "))
-               fprintf(gOutfp,"C    %8.3lf%8.3lf%8.3lf\n",p->x,p->y,p->z);
+               fprintf(gOutfp,"C    %8.3f%8.3f%8.3f\n",p->x,p->y,p->z);
          }
          if(!strcmp(p->atnam,"CA  "))
-            fprintf(gOutfp,"CA   %8.3lf%8.3lf%8.3lf\n",p->x,p->y,p->z);
+            fprintf(gOutfp,"CA   %8.3f%8.3f%8.3f\n",p->x,p->y,p->z);
       }
       else   /* PDB output */
       {
          if(!strcmp(p->atnam,"N   ")) 
          {
-            resnam = onethr(seq[resnum]);
+            resnam = blOnethr(seq[resnum]);
             resnum++;
 	 }
 
@@ -776,17 +836,17 @@ void WriteFragment(FILE *gOutfp, ENTRY *entry, BOOL calphas,
          {
             if(!strcmp(p->atnam,"N   "))
                fprintf(gOutfp,"ATOM  %5d  %-4s%-4s %4d    \
-%8.3lf%8.3lf%8.3lf\n",
+%8.3f%8.3f%8.3f\n",
                        atnum++,p->atnam,resnam,resnum,p->x,p->y,p->z);
 
             if(!strcmp(p->atnam,"C   "))
                fprintf(gOutfp,"ATOM  %5d  %-4s%-4s %4d    \
-%8.3lf%8.3lf%8.3lf\n",
+%8.3f%8.3f%8.3f\n",
                        atnum++,p->atnam,resnam,resnum,p->x,p->y,p->z);
          }
          if(!strcmp(p->atnam,"CA  "))
             fprintf(gOutfp,"ATOM  %5d  %-4s%-4s %4d    \
-%8.3lf%8.3lf%8.3lf\n",
+%8.3f%8.3f%8.3f\n",
                     atnum++,p->atnam,resnam,resnum,p->x,p->y,p->z);
       }
    }
