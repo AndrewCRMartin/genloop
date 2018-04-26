@@ -86,7 +86,13 @@ by a > sign
 
 
 The HITS FILE is simply a set of title lines which are copied
-into the output file.
+into the output file, but which must contain the sequence in
+parentheses.
+
+EXAMPLE HITS FILE
+=================
+First hit (RASEN)
+Second hit (RASQS)
 
 
 EXAMPLE TORSIONS FILE
