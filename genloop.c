@@ -3,7 +3,7 @@
    Program:    genloop
    File:       genloop.c
    
-   Version:    V2.5
+   Version:    V3.0
    Date:       21.01.21
    Function:   Build loop backbones from phi/psi/omega data
    
@@ -133,7 +133,7 @@ Residue    PHI      PSI     OMEGA
    V2.3  25.10.94 Another Bug fix in call to GetTorsions()
    V2.4  03.11.17 Updated for new Bioplib and various tidying for clean
                   compile for ISO C90
-   V2.5  21.01.21 Now outputs the oxygen as well and checks the hit file
+   V3.0  21.01.21 Now outputs the oxygen as well and checks the hit file
                   format
 
 *************************************************************************/
@@ -155,11 +155,13 @@ Residue    PHI      PSI     OMEGA
 #define MAXTOR 20   /* Max number of torsions (and therefore residues)  */
 
 /* Parameters from CHARMm                                               */
-#define ANGLE_C   117.5*PI/180.0
+#define ANGLE_C_N 117.5*PI/180.0
+#define ANGLE_C_O 121.25*PI/180.0
 #define ANGLE_N   120.0*PI/180.0
 #define ANGLE_CA  111.6*PI/180.0
 #define DIST_CA_C 1.52
 #define DIST_C_N  1.33
+#define DIST_C_O  1.24
 #define DIST_N_CA 1.49
 
 /************************************************************************/
@@ -236,7 +238,7 @@ int main(int argc, char **argv)
    }
    else
    {
-      printf("\ngenloop V2.5 (c) 1993-2021, Dr. Andrew C.R. Martin\n");
+      printf("\ngenloop V3.0 (c) 1993-2021, Dr. Andrew C.R. Martin\n");
       printf("\nUsage: genloop [-c] [-o] [-s] [-n] <hitfile> <torfile> \
 <outfile>\n");
       printf("       -c causes only C-alpha coordinates to be written\n");
@@ -449,7 +451,6 @@ void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut,
          fprintf(stderr, "The 1-letter code sequence must be in ()\n");
          exit(1);
       }
-   
 
       /* If it's a neural net file, we get the number of residues next  */
       if(DoNNFile)
@@ -500,11 +501,12 @@ void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut,
    }
 }
 
+
 /************************************************************************/
 /*>int GetTorsions(FILE *fp, int nres, REAL *phi, REAL *psi, 
                    BOOL DoOmega, REAL *omega)
    ---------------------------------------------------------
-   Get torsion angle data for a loop from torsion file
+   Get torsion angle data (in radians) for a loop from torsion file
 
    09.11.93 Original   By: ACRM
    10.11.93 Added omega input
@@ -575,12 +577,14 @@ int GetTorsions(FILE *fp, int nres, REAL *phi, REAL *psi, BOOL DoOmega,
 /************************************************************************/
 /*>ENTRY *BuildFragment(int ntor, REAL *phi, REAL *psi, REAL *omega)
    -----------------------------------------------------------------
-   Builds a fragment from a set of torsion angles. Assuming a fixed
-   trans omega angle for the peptide bond:
+   Builds a fragment from a set of torsion angles. Assuming fixed
+   bond lengths and angles:
    each phi angle defines the coordinates of this residues's C (and O)
    each psi angle defines the coordinates of the next residue's N
    each omega angle defines the coordinates of the next residue's CA
    The data are built into a ENTRY linked list.
+
+   The phi, psi and omega arrays are in radians
 
    09.11.93 Original   By: ACRM
    10.11.93 Added omega parameter
@@ -655,9 +659,41 @@ ENTRY *BuildFragment(int ntor, REAL *phi, REAL *psi, REAL *omega)
 
       if(i != (ntor-1))
       {
+         REAL  otor = 0.0;
+         ENTRY *n   = NULL,
+               *ca  = NULL,
+               *c   = NULL;
+         
+         /* Build the O position using the psi data                     */
+         otor = psi[i] + PI;
+         if(otor > 2*PI)
+            otor -= 2*PI;
+
+         n  = p->prev->prev;
+         ca = p->prev;
+         c  = p;
+         
+         if(BuildAtom(n, ca, c,                    /* N, CA, C coords   */
+                      ANGLE_C_O, DIST_C_O,         /* Constants         */
+                      otor,                        /* Torsion angle     */
+                      coords))                     /* Results           */
+	 {
+            D("Built psi O atom\n");
+            ALLOCNEXTPREV(p,ENTRY);
+            if(p == NULL)
+            {
+               FREELIST(entry,ENTRY);
+               return(NULL);
+            }
+            strcpy(p->atnam,"O   ");
+            p->x = coords[0];
+            p->y = coords[1];
+            p->z = coords[2];
+	 }
+
          /* Build the N position using the psi data                     */
-         if(BuildAtom(p->prev->prev, p->prev, p,   /* N, CA, C coords   */
-                      ANGLE_C, DIST_C_N,           /* Constants         */
+         if(BuildAtom(n, ca, c,                    /* N, CA, C coords   */
+                      ANGLE_C_N, DIST_C_N,         /* Constants         */
                       psi[i],                      /* Torsion angle     */
                       coords))                     /* Results           */
 	 {
@@ -672,10 +708,12 @@ ENTRY *BuildFragment(int ntor, REAL *phi, REAL *psi, REAL *omega)
             p->x = coords[0];
             p->y = coords[1];
             p->z = coords[2];
+
+            n = p;
 	 }
 
          /* Build the CA position using a 180 degree omega angle        */
-         if(BuildAtom(p->prev->prev, p->prev, p,   /* CA, C, N coords   */
+         if(BuildAtom(ca, c, n,                    /* CA, C, N coords   */
                       ANGLE_N, DIST_N_CA,          /* Constants         */
                       omega[i],                    /* Torsion angle     */
                       coords))                     /* Results           */
@@ -693,7 +731,41 @@ ENTRY *BuildFragment(int ntor, REAL *phi, REAL *psi, REAL *omega)
             p->z = coords[2];
 	 }
       }
+      else if(i == (ntor-1))
+      {
+         REAL  otor = 0.0;
+         ENTRY *n   = NULL,
+               *ca  = NULL,
+               *c   = NULL;
+         
+         /* Build the Cter O position using a made-up psi               */
+         otor = 2*PI/3;
+
+         n  = p->prev->prev;
+         ca = p->prev;
+         c  = p;
+         
+         if(BuildAtom(n, ca, c,                    /* N, CA, C coords   */
+                      ANGLE_C_O, DIST_C_O,         /* Constants         */
+                      otor,                        /* Torsion angle     */
+                      coords))                     /* Results           */
+	 {
+            D("Built psi O atom\n");
+            ALLOCNEXTPREV(p,ENTRY);
+            if(p == NULL)
+            {
+               FREELIST(entry,ENTRY);
+               return(NULL);
+            }
+            strcpy(p->atnam,"O   ");
+            p->x = coords[0];
+            p->y = coords[1];
+            p->z = coords[2];
+	 }
+
+      }
    }
+   
    return(entry);
 }
 
@@ -838,6 +910,8 @@ void WriteFragment(FILE *gOutfp, ENTRY *entry, BOOL calphas,
                fprintf(gOutfp,"N    %8.3f%8.3f%8.3f\n",p->x,p->y,p->z);
             if(!strcmp(p->atnam,"C   "))
                fprintf(gOutfp,"C    %8.3f%8.3f%8.3f\n",p->x,p->y,p->z);
+            if(!strcmp(p->atnam,"O   "))
+               fprintf(gOutfp,"O    %8.3f%8.3f%8.3f\n",p->x,p->y,p->z);
          }
          if(!strcmp(p->atnam,"CA  "))
             fprintf(gOutfp,"CA   %8.3f%8.3f%8.3f\n",p->x,p->y,p->z);
@@ -858,6 +932,10 @@ void WriteFragment(FILE *gOutfp, ENTRY *entry, BOOL calphas,
                        atnum++,p->atnam,resnam,resnum,p->x,p->y,p->z);
 
             if(!strcmp(p->atnam,"C   "))
+               fprintf(gOutfp,"ATOM  %5d  %-4s%-4s %4d    \
+%8.3f%8.3f%8.3f\n",
+                       atnum++,p->atnam,resnam,resnum,p->x,p->y,p->z);
+            if(!strcmp(p->atnam,"O   "))
                fprintf(gOutfp,"ATOM  %5d  %-4s%-4s %4d    \
 %8.3f%8.3f%8.3f\n",
                        atnum++,p->atnam,resnam,resnum,p->x,p->y,p->z);
