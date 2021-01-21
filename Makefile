@@ -1,5 +1,6 @@
 CC     = cc -ansi -pedantic -Wall
-COPT   = -O3 -L$(HOME)/lib -I$(HOME)/include
+#COPT   = -O3 -L$(HOME)/lib -I$(HOME)/include
+COPT   = -g -L$(HOME)/lib -I$(HOME)/include
 OFILES = genloop.o
 LIBS   = -lbiop -lgen -lm -lxml2
 

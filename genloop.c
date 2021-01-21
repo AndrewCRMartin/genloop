@@ -3,11 +3,11 @@
    Program:    genloop
    File:       genloop.c
    
-   Version:    V2.4
-   Date:       03.11.17
+   Version:    V2.5
+   Date:       21.01.21
    Function:   Build loop backbones from phi/psi/omega data
    
-   Copyright:  (c) SciTech Software 1993-2017
+   Copyright:  (c) SciTech Software 1993-2021
    Author:     Dr. Andrew C. R. Martin
    Address:    SciTech Software
    EMail:      andrew@bioinf.org.uk
@@ -133,6 +133,8 @@ Residue    PHI      PSI     OMEGA
    V2.3  25.10.94 Another Bug fix in call to GetTorsions()
    V2.4  03.11.17 Updated for new Bioplib and various tidying for clean
                   compile for ISO C90
+   V2.5  21.01.21 Now outputs the oxygen as well and checks the hit file
+                  format
 
 *************************************************************************/
 /* Includes
@@ -234,7 +236,7 @@ int main(int argc, char **argv)
    }
    else
    {
-      printf("\ngenloop V2.4 (c) 1993-2017, Dr. Andrew C.R. Martin\n");
+      printf("\ngenloop V2.5 (c) 1993-2021, Dr. Andrew C.R. Martin\n");
       printf("\nUsage: genloop [-c] [-o] [-s] [-n] <hitfile> <torfile> \
 <outfile>\n");
       printf("       -c causes only C-alpha coordinates to be written\n");
@@ -247,9 +249,13 @@ file and\n");
       printf("torsion file created by AbM or Martin Reczko's neural \
 nets\n");
 
-      printf("\n\n<hitfile> is simply a set of title lines which are \
-copied\n");
-      printf("into the output file.\n");
+      printf("\n\n<hitfile> is a set of title lines which are copied \
+into the output file.\n");
+      printf("Each line must contain the 1-letter code of the sequence \
+in parenthesis.\n");
+      printf("e.g.\n");
+      printf("\nConformation 1 (SASSS)\n");
+      printf("Conformation 2 (SASSS)\n");
 
       printf("\n<torfile> format is:\n");
 
@@ -437,7 +443,13 @@ void DoProcessing(BOOL calphas, BOOL DoOmega, BOOL SmallOut,
    while(fgets(HitBuffer,160,gHitfp))
    {
       fprintf(gOutfp,"REMARK %s",HitBuffer);
-      seq = GetSequence(HitBuffer);
+      if((seq = GetSequence(HitBuffer)) == NULL)
+      {
+         fprintf(stderr, "Sequence not provided for %s\n", HitBuffer);
+         fprintf(stderr, "The 1-letter code sequence must be in ()\n");
+         exit(1);
+      }
+   
 
       /* If it's a neural net file, we get the number of residues next  */
       if(DoNNFile)
@@ -875,7 +887,8 @@ char *GetSequence(char *buffer)
    /* Now find the (                                                    */
    ptr = strchr(buffer,'(');
 
-   if(ptr == NULL) return(NULL);
+   if(ptr == NULL)
+      return(NULL);
 
    return(ptr+1);
 }
